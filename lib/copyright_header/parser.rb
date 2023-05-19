@@ -22,10 +22,17 @@ require 'yaml'
 require 'erb'
 require 'ostruct'
 require 'linguist'
+require 'set'
+
+
+module Boolean; end
+class TrueClass; include Boolean; end
+class FalseClass; include Boolean; end
 
 module CopyrightHeader
   class FileNotFoundException < Exception; end
   class ExistingLicenseException < Exception; end
+  class FileOptException < Exception; end
 
   class License
     @lines = []
@@ -160,29 +167,45 @@ module CopyrightHeader
       return extension
     end
 
-    def supported?(file)
-      @config.has_key? ext(file)
+    def supported?(file, type)
+      extension = (type != nil ? type : ext(file))
+      @config.has_key?(extension)
     end
 
-    def header(file)
-      Header.new(file, @config[ext(file)])
+    def header(file, type)
+      extension = (type != nil ? type : ext(file))
+      Header.new(file, @config[extension])
     end
   end
 
   class Parser
     attr_accessor :options
-    @syntax = nil
-    @license = nil
+    @default_syntax = nil
+    @default_license = nil
+
+    @@valid_file_keys = Set[ :syntax, :ext, :include, :license_file, :license, :word_wrap,
+                             :copyright_software, :copyright_software_description, 
+                             :copyright_years, :copyright_holders, ]
+
+    @@file_opt_type_sets = {}
+    @@file_opt_type_sets[::Boolean] = Set[ :include ]
+    @@file_opt_type_sets[::Integer] = Set[ :word_wrap ]
+    @@file_opt_type_sets[::Array] = Set[ :copyright_years, :copyright_holders ]
+    @@file_opt_type_sets[::String] = @@valid_file_keys - 
+          (@@file_opt_type_sets[::Boolean] | @@file_opt_type_sets[::Integer] | @@file_opt_type_sets[::Array])
+    @@file_opt_files = [ :syntax, :license_file ]
+
+
     def initialize(options = {})
       @options = options
       @exclude = [ /^LICENSE(|\.txt)$/i, /^holders(|\.txt)$/i, /^README/, /^\./]
-      @license = License.new(:license_file => @options[:license_file],
-                             :copyright_software => @options[:copyright_software],
-                             :copyright_software_description => @options[:copyright_software_description],
-                             :copyright_years => @options[:copyright_years],
-                             :copyright_holders => @options[:copyright_holders],
-                             :word_wrap => @options[:word_wrap])
-      @syntax = Syntax.new(@options[:syntax], @options[:guess_extension])
+      @default_license = License.new(:license_file => @options[:license_file],
+                                     :copyright_software => @options[:copyright_software],
+                                     :copyright_software_description => @options[:copyright_software_description],
+                                     :copyright_years => @options[:copyright_years],
+                                     :copyright_holders => @options[:copyright_holders],
+                                     :word_wrap => @options[:word_wrap])
+      @default_syntax = Syntax.new(@options[:syntax], @options[:guess_extension])
     end
 
     def execute
@@ -195,40 +218,174 @@ module CopyrightHeader
       end
     end
 
+    def expand_env(str)
+      str.gsub(/\$([a-zA-Z_][a-zA-Z0-9_]*)|\${\g<1>}|%\g<1>%/) { ENV[$1] }
+    end
+
+    def check_file_conf(conf_filename, file, file_opts)
+      begin
+        opt_keys = file_opts.keys.to_set
+  
+        if !opt_keys.subset?(@@valid_file_keys)
+          raise FileOptException.new("have #{opt_keys.inspect} valid #{@@valid_file_keys.inspect}")
+        end
+  
+        if opt_keys.include?(:license_file) && opt_keys.include?(:license)
+          raise FileOptException.new("have both :license and :license_file options")
+        end 
+
+        @@file_opt_type_sets.each do |type, key_set|
+          check_file_opt_type(file_opts, opt_keys & key_set, type);
+        end
+
+      rescue FileOptException => e
+        STDERR.puts "ERROR: invalid file_opt keys in #{conf_filename} for #{file} - #{e.message}" 
+        exit(1);
+      end
+    end
+
+    def check_file_opt_type(file_opts, key_set, type)
+      key_set.each do |opt_key|
+        if !file_opts[opt_key].is_a?(type)
+          raise FileOptException.new("type wrong for '#{opt_key}', expect #{type}")
+        end
+      end 
+    end
+
+    def read_conf(conf_filename)
+      conf = File.open(conf_filename, 'r:bom|utf-8') { |f|
+        YAML.safe_load f, filename: conf_filename, symbolize_names: true
+      }
+
+      config = {}
+      conf.each do |file, file_opts|
+        check_file_conf(conf_filename, file, file_opts)
+
+        if file_opts.has_key?(:license)
+          file_opts[:license_file] = @options[:base_path] + '/licenses/' + file_opts[:license] + '.erb'
+        end
+
+        @@file_opt_files.each do |file_key|
+          file_opts[file_key] = expand_env(file_opts[file_key]) if file_opts.has_key?(file_key)
+        end
+
+        full_file_opts = @options.merge(file_opts)
+
+        begin
+          @@file_opt_files.each do |file_key|
+            unless File.file?(full_file_opts[file_key])
+              raise FileOptException.new("Invalid #{file_key} value. Cannot open #{full_file_opts[file_key]}")
+            end
+          end
+        rescue FileOptException => e
+          STDERR.puts "ERROR: In #{conf_filename} for #{file} - #{e.message}" 
+          exit(1);
+        end
+  
+
+        begin
+          if file_opts.has_key?(:license)
+            raise FileOptException.new("Missing copyright-software:") if full_file_opts[:copyright_software].nil?
+            raise FileOptException.new("Missing copyright-software-description:") if full_file_opts[:copyright_software_description].nil?
+            raise FileOptException.new("Missing copyright-holder:") unless full_file_opts[:copyright_holders].length > 0
+            raise FileOptException.new("Missing copyright-year:") unless full_file_opts[:copyright_years].length > 0
+          end
+        rescue FileOptException => e
+          STDERR.puts "ERROR: In #{conf_filename} for #{file} - #{e.message} (required when using :license)" 
+          exit(1);
+        end
+
+        config[file.to_s] = full_file_opts
+      end
+
+      return config
+    end
+
+
     def transform(method, path)
       paths = []
+      top_path = File.expand_path(path)
       if File.file?(path)
         paths << path
+        top_path = File.dirname(File.expand_path(path))
       else
-        paths << Dir.glob("#{path}/**/*")
+        paths << Dir.glob("#{path}/**/{*,.*}")
+      end
+
+      @confs = {}
+      if File.file?("#{top_path}/.cr_conf.yml")
+        STDERR.puts "GOT a TOP DIR .cr_conf.yml for dir #{top_path}"
+        @confs[top_path] = read_conf("#{top_path}/.cr_conf.yml")
       end
 
       paths.flatten!
 
       paths.each do |path|
         begin
-          if File.file?(path)
+          dir = File.dirname(File.expand_path(path))
+          conf = @confs.key?(dir) ? @confs[dir] : {}
+
+          base_name = File.basename(path)
+   
+          syntax = @default_syntax
+          license = @default_license
+
+          file_opts = @options
+          extension = nil
+
+          if conf.key?(base_name) 
+            file_opts = conf[base_name]
+            if file_opts[:include] == false
+              STDERR.puts "SKIP #{path}; in .cr_conf.yml"
+              next
+            else
+              if file_opts[:license_file] != @options[:license_file] ||
+                 @options[:copyright_software] != file_opts[:copyright_software] ||
+                 @options[:copyright_software_description] != file_opts[:copyright_software_description] ||
+                 @options[:copyright_years] != file_opts[:copyright_years] ||
+                 @options[:copyright_holders] != file_opts[:copyright_holders] ||
+                 @options[:word_wrap] != file_opts[:word_wrap]
+                license = License.new(:license_file => file_opts[:license_file],
+                                      :copyright_software => file_opts[:copyright_software],
+                                      :copyright_software_description => file_opts[:copyright_software_description],
+                                      :copyright_years => file_opts[:copyright_years],
+                                      :copyright_holders => file_opts[:copyright_holders],
+                                      :word_wrap => file_opts[:word_wrap])
+              end
+
+              if file_opts[:syntax] != @options[:syntax]
+                syntax = Syntax.new(file_opts[:syntax], file_opts[:guess_extension])
+              end
+
+            end
+          elsif File.file?(path)
             if File.basename(path).match(Regexp.union(@exclude))
               STDERR.puts "SKIP #{path}; excluded"
               next
             end
           elsif File.directory?(path)
+            if File.file?("#{path}/.cr_conf.yml")
+              STDERR.puts "GOT a .cr_conf.yml for #{path}"
+              @confs[File.expand_path(path)] = read_conf("#{path}/.cr_conf.yml")
+            end
             next
           else
             STDERR.puts "SKIP #{path}; not file"
             next
           end
 
-          if @syntax.supported?(path)
-            header = @syntax.header(path)
-            contents = header.send(method, @license)
+          extension = file_opts[:ext] if file_opts.has_key?(:ext)
+
+          if syntax.supported?(path, extension)
+            header = syntax.header(path, extension)
+            contents = header.send(method, license)
             if contents.nil?
               STDERR.puts "SKIP #{path}; failed to generate license"
             else
               write(path, contents)
             end
           else
-            STDERR.puts "SKIP #{path}; unsupported #{@syntax.ext(path)}"
+            STDERR.puts "SKIP #{path}; unsupported #{extension == nil ? syntax.ext(path) : extension}"
           end
         rescue Exception => e
           STDERR.puts "SKIP #{path}; exception=#{e.message}"
