@@ -299,7 +299,8 @@ module CopyrightHeader
 
     def read_conf(conf_filename)
       conf = File.open(conf_filename, 'r:bom|utf-8') { |f|
-        YAML.safe_load f, filename: conf_filename, symbolize_names: true
+#        YAML.safe_load f, filename: conf_filename, symbolize_names: true
+        YAML.safe_load f, [], [], false, conf_filename, symbolize_names: true
       }
 
       config = {}
