@@ -91,7 +91,7 @@ css:
 c:
   ext: ['.c', '.h']
   comment:
-    open:   '/*'
+    open:   '/*\n'
     close:  ' */\n\n'
     prefix: ' * '
 
