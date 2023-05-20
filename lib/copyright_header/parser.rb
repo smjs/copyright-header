@@ -82,8 +82,8 @@ module CopyrightHeader
       license.format(@config[:comment]['open'], @config[:comment]['close'], @config[:comment]['prefix'])
     end
 
-    def add(license)
-      if has_copyright?
+    def add(license, check_regex = nil)
+      if has_copyright?(check_regex)
         raise ExistingLicenseException.new("detected existing license")
       end
 
@@ -122,8 +122,8 @@ module CopyrightHeader
       return text
     end
 
-    def remove(license)
-      if has_copyright?
+    def remove(license, check_regex = nil)
+      if has_copyright?(check_regex)
         text = self.format(license)
         # Due to editors messing with whitespace, we'll make this more of a fuzzy match and use \s to match whitespace
         pattern = Regexp.escape(text).gsub(/\\[ n]/, '\s*').gsub(/\\s*$/, '\s')
@@ -136,8 +136,10 @@ module CopyrightHeader
       end
     end
 
-    def has_copyright?(lines = 10)
-      @contents.split(/\n/)[0..lines].select { |line| line =~ /(?!class\s+)([Cc]opyright|[Ll]icense)\s/ }.length > 0
+    def has_copyright?(regex_str = nil, lines = 10)
+      regex_str ||= '(?!class\s+)([Cc]opyright|[Ll]icense)\s'
+      exp = Regexp.new(regex_str)
+      @contents.split(/\n/)[0..lines].select { |line| exp.match(line) }.length > 0
     end
   end
 
@@ -186,7 +188,7 @@ module CopyrightHeader
 
     @@valid_file_keys = Set[ :syntax, :ext, :include, :license_file, :license, :word_wrap,
                              :copyright_software, :copyright_software_description, 
-                             :copyright_years, :copyright_holders, ]
+                             :copyright_years, :copyright_holders, :check_regex]
 
     @@file_opt_type_sets = {}
     @@file_opt_type_sets[::Boolean] = Set[ :include ]
@@ -415,10 +417,11 @@ module CopyrightHeader
           syntax = configuration.syntax_for_file(base_name)
           license = configuration.license_for_file(base_name)
           extension = file_opts.has_key?(:ext) ? file_opts[:ext] : nil
+          check_regex = file_opts.has_key?(:check_regex) ? file_opts[:check_regex] : nil
 
           if syntax.supported?(path, extension)
             header = syntax.header(path, extension)
-            contents = header.send(method, license)
+            contents = header.send(method, license, check_regex)
             if contents.nil?
               STDERR.puts "SKIP #{path}; failed to generate license"
             else
