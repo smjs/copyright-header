@@ -344,7 +344,6 @@ module CopyrightHeader
     end
   end
 
-
   class Parser
     attr_accessor :options
 
@@ -370,10 +369,8 @@ module CopyrightHeader
         paths << path
         top_path = File.dirname(File.expand_path(path))
       else
-        paths << Dir.glob("#{path}/{*,.*}")
+        paths.push(*Dir.glob("#{path}/{*,.*}"))
       end
-
-      paths.flatten!
 
       process_paths(method, top_path, paths)
     end
@@ -406,9 +403,7 @@ module CopyrightHeader
               next
             end
 
-            sub_paths = []
-            sub_paths << Dir.glob("#{path}/{*,.*}")
-            sub_paths.flatten!
+            sub_paths = Dir.glob("#{path}/{*,.*}")
 
             process_paths(method, path, sub_paths)
             next
