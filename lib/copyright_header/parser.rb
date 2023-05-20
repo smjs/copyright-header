@@ -309,22 +309,24 @@ module CopyrightHeader
         paths << path
         top_path = File.dirname(File.expand_path(path))
       else
-        paths << Dir.glob("#{path}/**/{*,.*}")
-      end
-
-      @confs = {}
-      if File.file?("#{top_path}/.cr_conf.yml")
-        STDERR.puts "GOT a TOP DIR .cr_conf.yml for dir #{top_path}"
-        @confs[top_path] = read_conf("#{top_path}/.cr_conf.yml")
+        paths << Dir.glob("#{path}/{*,.*}")
       end
 
       paths.flatten!
 
+      process_paths(method, top_path, paths)
+    end
+
+    # Note: This is a recursive function
+    def process_paths(method, dir, paths)
+      conf = {}
+      if File.file?("#{dir}/.cr_conf.yml")
+        STDERR.puts "GOT a .cr_conf.yml for dir #{dir}"
+        conf = read_conf("#{dir}/.cr_conf.yml")
+      end
+
       paths.each do |path|
         begin
-          dir = File.dirname(File.expand_path(path))
-          conf = @confs.key?(dir) ? @confs[dir] : {}
-
           base_name = File.basename(path)
    
           syntax = @default_syntax
@@ -336,7 +338,7 @@ module CopyrightHeader
           if conf.key?(base_name) 
             file_opts = conf[base_name]
             if file_opts[:include] == false
-              STDERR.puts "SKIP #{path}; in .cr_conf.yml"
+              STDERR.puts "SKIP #{path}; excluded in .cr_conf.yml"
               next
             else
               if file_opts[:license_file] != @options[:license_file] ||
@@ -356,20 +358,27 @@ module CopyrightHeader
               if file_opts[:syntax] != @options[:syntax]
                 syntax = Syntax.new(file_opts[:syntax], file_opts[:guess_extension])
               end
-
             end
-          elsif File.file?(path)
-            if File.basename(path).match(Regexp.union(@exclude))
+          else
+            if base_name.match(Regexp.union(@exclude))
               STDERR.puts "SKIP #{path}; excluded"
               next
             end
-          elsif File.directory?(path)
-            if File.file?("#{path}/.cr_conf.yml")
-              STDERR.puts "GOT a .cr_conf.yml for #{path}"
-              @confs[File.expand_path(path)] = read_conf("#{path}/.cr_conf.yml")
+          end
+
+          if File.directory?(path)
+            if base_name == "." || base_name == ".."
+              STDERR.puts "SKIP #{path}; . or .."
+              next
             end
+
+            sub_paths = []
+            sub_paths << Dir.glob("#{path}/{*,.*}")
+            sub_paths.flatten!
+
+            process_paths(method, path, sub_paths)
             next
-          else
+          elsif !File.file?(path)
             STDERR.puts "SKIP #{path}; not file"
             next
           end
