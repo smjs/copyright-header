@@ -179,8 +179,6 @@ module CopyrightHeader
   end
 
   class Configuration
-    attr_accessor :conf
-
     @default_syntax = nil
     @default_license = nil
 
@@ -215,10 +213,22 @@ module CopyrightHeader
       end
     end
 
+    def has_custom_options?(base_name)
+      return @conf.key?(base_name) 
+    end
+
+    def options_for_file(base_name)
+      file_opts = @options
+      if has_custom_options?(base_name) 
+        file_opts = @conf[base_name]
+      end
+      return file_opts
+    end
+
     def license_for_file(base_name)
       license = @default_license
 
-      if @conf.key?(base_name) 
+      if has_custom_options?(base_name) 
         file_opts = @conf[base_name]
         if file_opts[:license_file] != @options[:license_file] ||
            @options[:copyright_software] != file_opts[:copyright_software] ||
@@ -241,7 +251,7 @@ module CopyrightHeader
 
     def syntax_for_file(base_name)
       syntax = @default_syntax
-      if @conf.key?(base_name) 
+      if has_custom_options?(base_name) 
         file_opts = @conf[base_name]
         if file_opts[:syntax] != @options[:syntax]
           STDERR.puts "USING custom syntax"
@@ -372,16 +382,13 @@ module CopyrightHeader
     def process_paths(method, dir, paths)
       configuration = Configuration.new(dir, @options)
 
-      conf = configuration.conf
-
       paths.each do |path|
         begin
           base_name = File.basename(path)
    
-          file_opts = @options
+          file_opts = configuration.options_for_file(base_name)
 
-          if conf.key?(base_name) 
-            file_opts = conf[base_name]
+          if configuration.has_custom_options?(base_name) 
             if file_opts[:include] == false
               STDERR.puts "SKIP #{path}; excluded in .cr_conf.yml"
               next
