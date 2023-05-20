@@ -178,10 +178,13 @@ module CopyrightHeader
     end
   end
 
-  class Parser
-    attr_accessor :options
+  class Configuration
+    attr_accessor :conf
+
     @default_syntax = nil
     @default_license = nil
+
+    @conf = {}
 
     @@valid_file_keys = Set[ :syntax, :ext, :include, :license_file, :license, :word_wrap,
                              :copyright_software, :copyright_software_description, 
@@ -195,10 +198,8 @@ module CopyrightHeader
           (@@file_opt_type_sets[::Boolean] | @@file_opt_type_sets[::Integer] | @@file_opt_type_sets[::Array])
     @@file_opt_files = [ :syntax, :license_file ]
 
-
-    def initialize(options = {})
+    def initialize(dir, options = {})
       @options = options
-      @exclude = [ /^LICENSE(|\.txt)$/i, /^holders(|\.txt)$/i, /^README/, /^\./]
       @default_license = License.new(:license_file => @options[:license_file],
                                      :copyright_software => @options[:copyright_software],
                                      :copyright_software_description => @options[:copyright_software_description],
@@ -206,16 +207,48 @@ module CopyrightHeader
                                      :copyright_holders => @options[:copyright_holders],
                                      :word_wrap => @options[:word_wrap])
       @default_syntax = Syntax.new(@options[:syntax], @options[:guess_extension])
+
+      @conf = {}
+      if File.file?("#{dir}/.cr_conf.yml")
+        STDERR.puts "GOT a .cr_conf.yml for dir #{dir}"
+        @conf = read_conf("#{dir}/.cr_conf.yml")
+      end
     end
 
-    def execute
-      if @options.has_key?(:add_path)
-        @options[:add_path].split(File::PATH_SEPARATOR).each { |path| add(path) }
-      end
+    def license_for_file(base_name)
+      license = @default_license
 
-      if @options.has_key?(:remove_path)
-        @options[:remove_path].split(File::PATH_SEPARATOR).each { |path| remove(path) }
+      if @conf.key?(base_name) 
+        file_opts = @conf[base_name]
+        if file_opts[:license_file] != @options[:license_file] ||
+           @options[:copyright_software] != file_opts[:copyright_software] ||
+           @options[:copyright_software_description] != file_opts[:copyright_software_description] ||
+           @options[:copyright_years] != file_opts[:copyright_years] ||
+           @options[:copyright_holders] != file_opts[:copyright_holders] ||
+           @options[:word_wrap] != file_opts[:word_wrap]
+
+          STDERR.puts "USING custom license"
+          license = License.new(:license_file => file_opts[:license_file],
+                                :copyright_software => file_opts[:copyright_software],
+                                :copyright_software_description => file_opts[:copyright_software_description],
+                                :copyright_years => file_opts[:copyright_years],
+                                :copyright_holders => file_opts[:copyright_holders],
+                                :word_wrap => file_opts[:word_wrap])
+        end
       end
+      return license
+    end
+
+    def syntax_for_file(base_name)
+      syntax = @default_syntax
+      if @conf.key?(base_name) 
+        file_opts = @conf[base_name]
+        if file_opts[:syntax] != @options[:syntax]
+          STDERR.puts "USING custom syntax"
+          syntax = Syntax.new(file_opts[:syntax], file_opts[:guess_extension])
+        end
+      end
+      return syntax
     end
 
     def expand_env(str)
@@ -282,7 +315,6 @@ module CopyrightHeader
           exit(1);
         end
   
-
         begin
           if file_opts.has_key?(:license)
             raise FileOptException.new("Missing copyright-software:") if full_file_opts[:copyright_software].nil?
@@ -300,7 +332,26 @@ module CopyrightHeader
 
       return config
     end
+  end
 
+
+  class Parser
+    attr_accessor :options
+
+    def initialize(options = {})
+      @options = options
+      @exclude = [ /^LICENSE(|\.txt)$/i, /^holders(|\.txt)$/i, /^README/, /^\./]
+    end
+
+    def execute
+      if @options.has_key?(:add_path)
+        @options[:add_path].split(File::PATH_SEPARATOR).each { |path| add(path) }
+      end
+
+      if @options.has_key?(:remove_path)
+        @options[:remove_path].split(File::PATH_SEPARATOR).each { |path| remove(path) }
+      end
+    end
 
     def transform(method, path)
       paths = []
@@ -317,47 +368,23 @@ module CopyrightHeader
       process_paths(method, top_path, paths)
     end
 
-    # Note: This is a recursive function
+    # Note: This is a recursive method
     def process_paths(method, dir, paths)
-      conf = {}
-      if File.file?("#{dir}/.cr_conf.yml")
-        STDERR.puts "GOT a .cr_conf.yml for dir #{dir}"
-        conf = read_conf("#{dir}/.cr_conf.yml")
-      end
+      configuration = Configuration.new(dir, @options)
+
+      conf = configuration.conf
 
       paths.each do |path|
         begin
           base_name = File.basename(path)
    
-          syntax = @default_syntax
-          license = @default_license
-
           file_opts = @options
-          extension = nil
 
           if conf.key?(base_name) 
             file_opts = conf[base_name]
             if file_opts[:include] == false
               STDERR.puts "SKIP #{path}; excluded in .cr_conf.yml"
               next
-            else
-              if file_opts[:license_file] != @options[:license_file] ||
-                 @options[:copyright_software] != file_opts[:copyright_software] ||
-                 @options[:copyright_software_description] != file_opts[:copyright_software_description] ||
-                 @options[:copyright_years] != file_opts[:copyright_years] ||
-                 @options[:copyright_holders] != file_opts[:copyright_holders] ||
-                 @options[:word_wrap] != file_opts[:word_wrap]
-                license = License.new(:license_file => file_opts[:license_file],
-                                      :copyright_software => file_opts[:copyright_software],
-                                      :copyright_software_description => file_opts[:copyright_software_description],
-                                      :copyright_years => file_opts[:copyright_years],
-                                      :copyright_holders => file_opts[:copyright_holders],
-                                      :word_wrap => file_opts[:word_wrap])
-              end
-
-              if file_opts[:syntax] != @options[:syntax]
-                syntax = Syntax.new(file_opts[:syntax], file_opts[:guess_extension])
-              end
             end
           else
             if base_name.match(Regexp.union(@exclude))
@@ -383,7 +410,9 @@ module CopyrightHeader
             next
           end
 
-          extension = file_opts[:ext] if file_opts.has_key?(:ext)
+          syntax = configuration.syntax_for_file(base_name)
+          license = configuration.license_for_file(base_name)
+          extension = file_opts.has_key?(:ext) ? file_opts[:ext] : nil
 
           if syntax.supported?(path, extension)
             header = syntax.header(path, extension)
