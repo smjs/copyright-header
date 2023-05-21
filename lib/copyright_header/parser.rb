@@ -185,6 +185,8 @@ module CopyrightHeader
     @default_license = nil
 
     @conf = {}
+    @matched_key_cache = {}
+    @dir = nil
 
     @@valid_file_keys = Set[ :syntax, :ext, :include, :license_file, :license, :word_wrap,
                              :copyright_software, :copyright_software_description, 
@@ -208,6 +210,9 @@ module CopyrightHeader
                                      :word_wrap => @options[:word_wrap])
       @default_syntax = Syntax.new(@options[:syntax], @options[:guess_extension])
 
+      @dir = dir
+
+      @matched_key_cache = {}
       @conf = {}
       if File.file?("#{dir}/.cr_conf.yml")
         STDERR.puts "GOT a .cr_conf.yml for dir #{dir}"
@@ -216,13 +221,38 @@ module CopyrightHeader
     end
 
     def has_custom_options?(base_name)
-      return @conf.key?(base_name) 
+      return (get_key(base_name) != nil)
+    end
+
+    def get_key(base_name) 
+      if ! @matched_key_cache.key?(base_name) 
+        # Prioritise exact key match over glob match
+        if @conf.key?(base_name) 
+          @matched_key_cache[base_name] = base_name
+        else
+          @conf.each_key do | key |
+            if File.fnmatch(key, base_name)
+              if @matched_key_cache.key?(base_name)
+                STDERR.puts "WARNING: File #{base_name} matches multiple keys in .cr_conf.yml in @dir"
+              else
+                @matched_key_cache[base_name] = key 
+              end
+            end
+          end
+        end
+        @matched_key_cache[base_name] = nil if ! @matched_key_cache.key?(base_name)
+      end
+
+      #STDERR.puts "KEY for file #{base_name} is #{@matched_key_cache[base_name] != nil ? @matched_key_cache[base_name] : "nil"}"
+      return @matched_key_cache[base_name] 
     end
 
     def options_for_file(base_name)
       file_opts = @options
-      if has_custom_options?(base_name) 
-        file_opts = @conf[base_name]
+      matched_key = get_key(base_name)
+      
+      if matched_key != nil
+        file_opts = @conf[matched_key]
       end
       return file_opts
     end
@@ -230,8 +260,8 @@ module CopyrightHeader
     def license_for_file(base_name)
       license = @default_license
 
-      if has_custom_options?(base_name) 
-        file_opts = @conf[base_name]
+      if has_custom_options?(base_name)
+        file_opts = options_for_file(base_name)
         if file_opts[:license_file] != @options[:license_file] ||
            @options[:copyright_software] != file_opts[:copyright_software] ||
            @options[:copyright_software_description] != file_opts[:copyright_software_description] ||
@@ -253,8 +283,9 @@ module CopyrightHeader
 
     def syntax_for_file(base_name)
       syntax = @default_syntax
-      if has_custom_options?(base_name) 
-        file_opts = @conf[base_name]
+      
+      if has_custom_options?(base_name)
+        file_opts = options_for_file(base_name)
         if file_opts[:syntax] != @options[:syntax]
           STDERR.puts "USING custom syntax"
           syntax = Syntax.new(file_opts[:syntax], file_opts[:guess_extension])
