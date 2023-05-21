@@ -60,7 +60,7 @@ php:
     close:  ' */ ?>\n'
     prefix: ' * '
 
-javacript:
+javascript:
   ext: ['.js', '.jsx']
   comment:
     open:   '/*\n'
@@ -154,7 +154,7 @@ m4:
 
 # Most shells, really
 shell:
-  ext:  ['.sh']
+  ext:  ['.sh', '.csh']
   after: ['^#!']
   comment:
     open:   '#\n'
@@ -235,6 +235,7 @@ rust:
     open: '/*\n'
     close: ' */\n\n'
     prefix: ' * '
+
 # Conf files i.e. apache config, splunk.conf files
 conf:
   ext:  ['.conf']

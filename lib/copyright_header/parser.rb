@@ -283,6 +283,10 @@ module CopyrightHeader
           check_file_opt_type(file_opts, opt_keys & key_set, type);
         end
 
+        if opt_keys.include?(:include) && file_opts[:include] == false && opt_keys.size() > 1
+          STDERR.puts "WARNING: In #{conf_filename} for #{file} - :include set to false, but other options provided" 
+        end
+
       rescue FileOptException => e
         STDERR.puts "ERROR: invalid file_opt keys in #{conf_filename} for #{file} - #{e.message}" 
         exit(1);
