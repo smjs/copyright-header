@@ -189,14 +189,14 @@ module CopyrightHeader
     @dir = nil
 
     @@valid_file_keys = Set[ :syntax, :ext, :include, :license_file, :license, :word_wrap,
-                             :copyright_software, :copyright_software_description, 
+                             :copyright_software, :copyright_software_description,
                              :copyright_years, :copyright_holders, :check_regex]
 
     @@file_opt_type_sets = {}
     @@file_opt_type_sets[::Boolean] = Set[ :include ]
     @@file_opt_type_sets[::Integer] = Set[ :word_wrap ]
     @@file_opt_type_sets[::Array] = Set[ :copyright_years, :copyright_holders ]
-    @@file_opt_type_sets[::String] = @@valid_file_keys - 
+    @@file_opt_type_sets[::String] = @@valid_file_keys -
           (@@file_opt_type_sets[::Boolean] | @@file_opt_type_sets[::Integer] | @@file_opt_type_sets[::Array])
     @@file_opt_files = [ :syntax, :license_file ]
 
@@ -211,8 +211,8 @@ module CopyrightHeader
       @default_syntax = Syntax.new(@options[:syntax], @options[:guess_extension])
 
       @dir = dir
-
       @matched_key_cache = {}
+
       @conf = {}
       if File.file?("#{dir}/.cr_conf.yml")
         STDERR.puts "GOT a .cr_conf.yml for dir #{dir}"
@@ -224,10 +224,10 @@ module CopyrightHeader
       return (get_key(base_name) != nil)
     end
 
-    def get_key(base_name) 
-      if ! @matched_key_cache.key?(base_name) 
+    def get_key(base_name)
+      if ! @matched_key_cache.key?(base_name)
         # Prioritise exact key match over glob match
-        if @conf.key?(base_name) 
+        if @conf.key?(base_name)
           @matched_key_cache[base_name] = base_name
         else
           @conf.each_key do | key |
@@ -235,7 +235,7 @@ module CopyrightHeader
               if @matched_key_cache.key?(base_name)
                 STDERR.puts "WARNING: File #{base_name} matches multiple keys in .cr_conf.yml in @dir"
               else
-                @matched_key_cache[base_name] = key 
+                @matched_key_cache[base_name] = key
               end
             end
           end
@@ -243,14 +243,13 @@ module CopyrightHeader
         @matched_key_cache[base_name] = nil if ! @matched_key_cache.key?(base_name)
       end
 
-      #STDERR.puts "KEY for file #{base_name} is #{@matched_key_cache[base_name] != nil ? @matched_key_cache[base_name] : "nil"}"
-      return @matched_key_cache[base_name] 
+      return @matched_key_cache[base_name]
     end
 
     def options_for_file(base_name)
       file_opts = @options
       matched_key = get_key(base_name)
-      
+
       if matched_key != nil
         file_opts = @conf[matched_key]
       end
@@ -269,7 +268,7 @@ module CopyrightHeader
            @options[:copyright_holders] != file_opts[:copyright_holders] ||
            @options[:word_wrap] != file_opts[:word_wrap]
 
-          STDERR.puts "USING custom license"
+          STDERR.puts "USING custom license for #{base_name}"
           license = License.new(:license_file => file_opts[:license_file],
                                 :copyright_software => file_opts[:copyright_software],
                                 :copyright_software_description => file_opts[:copyright_software_description],
@@ -283,11 +282,11 @@ module CopyrightHeader
 
     def syntax_for_file(base_name)
       syntax = @default_syntax
-      
+
       if has_custom_options?(base_name)
         file_opts = options_for_file(base_name)
         if file_opts[:syntax] != @options[:syntax]
-          STDERR.puts "USING custom syntax"
+          STDERR.puts "USING custom syntax for #{base_name}"
           syntax = Syntax.new(file_opts[:syntax], file_opts[:guess_extension])
         end
       end
@@ -301,25 +300,25 @@ module CopyrightHeader
     def check_file_conf(conf_filename, file, file_opts)
       begin
         opt_keys = file_opts.keys.to_set
-  
+
         if !opt_keys.subset?(@@valid_file_keys)
           raise FileOptException.new("have #{opt_keys.inspect} valid #{@@valid_file_keys.inspect}")
         end
-  
+
         if opt_keys.include?(:license_file) && opt_keys.include?(:license)
           raise FileOptException.new("have both :license and :license_file options")
-        end 
+        end
 
         @@file_opt_type_sets.each do |type, key_set|
           check_file_opt_type(file_opts, opt_keys & key_set, type);
         end
 
         if opt_keys.include?(:include) && file_opts[:include] == false && opt_keys.size() > 1
-          STDERR.puts "WARNING: In #{conf_filename} for #{file} - :include set to false, but other options provided" 
+          STDERR.puts "WARNING: In #{conf_filename} for #{file} - :include set to false, but other options provided"
         end
 
       rescue FileOptException => e
-        STDERR.puts "ERROR: invalid file_opt keys in #{conf_filename} for #{file} - #{e.message}" 
+        STDERR.puts "ERROR: invalid file_opt keys in #{conf_filename} for #{file} - #{e.message}"
         exit(1);
       end
     end
@@ -329,14 +328,19 @@ module CopyrightHeader
         if !file_opts[opt_key].is_a?(type)
           raise FileOptException.new("type wrong for '#{opt_key}', expect #{type}")
         end
-      end 
+      end
     end
 
     def read_conf(conf_filename)
       conf = File.open(conf_filename, 'r:bom|utf-8') { |f|
-#        YAML.safe_load f, filename: conf_filename, symbolize_names: true
         YAML.safe_load f, [], [], false, conf_filename, symbolize_names: true
       }
+  
+      if conf == nil 
+        conf = []
+        STDERR.puts "NOTE: #{conf_filename} is empty"
+      end
+        
 
       config = {}
       conf.each do |file, file_opts|
@@ -359,10 +363,10 @@ module CopyrightHeader
             end
           end
         rescue FileOptException => e
-          STDERR.puts "ERROR: In #{conf_filename} for #{file} - #{e.message}" 
+          STDERR.puts "ERROR: In #{conf_filename} for #{file} - #{e.message}"
           exit(1);
         end
-  
+
         begin
           if file_opts.has_key?(:license)
             raise FileOptException.new("Missing copyright-software:") if full_file_opts[:copyright_software].nil?
@@ -371,7 +375,7 @@ module CopyrightHeader
             raise FileOptException.new("Missing copyright-year:") unless full_file_opts[:copyright_years].length > 0
           end
         rescue FileOptException => e
-          STDERR.puts "ERROR: In #{conf_filename} for #{file} - #{e.message} (required when using :license)" 
+          STDERR.puts "ERROR: In #{conf_filename} for #{file} - #{e.message} (required when using :license)"
           exit(1);
         end
 
@@ -420,10 +424,10 @@ module CopyrightHeader
       paths.each do |path|
         begin
           base_name = File.basename(path)
-   
+
           file_opts = configuration.options_for_file(base_name)
 
-          if configuration.has_custom_options?(base_name) 
+          if configuration.has_custom_options?(base_name)
             if file_opts[:include] == false
               STDERR.puts "SKIP #{path}; excluded in .cr_conf.yml"
               next
@@ -436,10 +440,8 @@ module CopyrightHeader
           end
 
           if File.directory?(path)
-            if base_name == "." || base_name == ".."
-              STDERR.puts "SKIP #{path}; . or .."
-              next
-            end
+            # belt and braces check for . and .. - recursing on these is bad
+            next if base_name == "." || base_name == ".."
 
             sub_paths = Dir.glob("#{path}/{*,.*}")
 
@@ -459,7 +461,7 @@ module CopyrightHeader
             header = syntax.header(path, extension)
             contents = header.send(method, license, check_regex)
             if contents.nil?
-              STDERR.puts "SKIP #{path}; failed to generate license"
+              STDERR.puts "SKIP #{path}; failed to #{method == "add:" ? "add" : "remove"} license"
             else
               write(path, contents)
             end
