@@ -181,13 +181,6 @@ module CopyrightHeader
   end
 
   class Configuration
-    @default_syntax = nil
-    @default_license = nil
-
-    @conf = {}
-    @matched_key_cache = {}
-    @dir = nil
-
     @@valid_file_keys = Set[ :syntax, :ext, :include, :license_file, :license, :word_wrap,
                              :copyright_software, :copyright_software_description,
                              :copyright_years, :copyright_holders, :check_regex]
@@ -335,12 +328,11 @@ module CopyrightHeader
       conf = File.open(conf_filename, 'r:bom|utf-8') { |f|
         YAML.safe_load f, [], [], false, conf_filename, symbolize_names: true
       }
-  
-      if conf == nil 
+
+      if conf == nil
         conf = []
         STDERR.puts "NOTE: #{conf_filename} is empty"
       end
-        
 
       config = {}
       conf.each do |file, file_opts|
@@ -387,8 +379,6 @@ module CopyrightHeader
   end
 
   class Parser
-    attr_accessor :options
-
     def initialize(options = {})
       @options = options
       @exclude = [ /^LICENSE(|\.txt)$/i, /^holders(|\.txt)$/i, /^README/, /^\./]
@@ -406,15 +396,17 @@ module CopyrightHeader
 
     def transform(method, path)
       paths = []
-      top_path = File.expand_path(path)
+      top_dir = nil
+
       if File.file?(path)
         paths << path
-        top_path = File.dirname(File.expand_path(path))
+        top_dir = File.dirname(File.expand_path(path))
       else
         paths.push(*Dir.glob("#{path}/{*,.*}"))
+        top_dir = File.expand_path(path)
       end
 
-      process_paths(method, top_path, paths)
+      process_paths(method, top_dir, paths)
     end
 
     # Note: This is a recursive method
@@ -454,11 +446,11 @@ module CopyrightHeader
 
           syntax = configuration.syntax_for_file(base_name)
           license = configuration.license_for_file(base_name)
-          extension = file_opts.has_key?(:ext) ? file_opts[:ext] : nil
+          ext_override = file_opts.has_key?(:ext) ? file_opts[:ext] : nil
           check_regex = file_opts.has_key?(:check_regex) ? file_opts[:check_regex] : nil
 
-          if syntax.supported?(path, extension)
-            header = syntax.header(path, extension)
+          if syntax.supported?(path, ext_override)
+            header = syntax.header(path, ext_override)
             contents = header.send(method, license, check_regex)
             if contents.nil?
               STDERR.puts "SKIP #{path}; failed to #{method == "add:" ? "add" : "remove"} license"
@@ -466,7 +458,7 @@ module CopyrightHeader
               write(path, contents)
             end
           else
-            STDERR.puts "SKIP #{path}; unsupported #{extension == nil ? syntax.ext(path) : extension}"
+            STDERR.puts "SKIP #{path}; unsupported #{ext_override == nil ? syntax.ext(path) : ext_override}"
           end
         rescue Exception => e
           STDERR.puts "SKIP #{path}; exception=#{e.message}"
