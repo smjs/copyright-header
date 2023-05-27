@@ -18,6 +18,7 @@
 # along with Copyright Header.  If not, see <http://www.gnu.org/licenses/>.
 #
 require 'optparse'
+require 'pathname'
 
 module CopyrightHeader
   class MissingArgumentException < Exception; end
@@ -39,6 +40,10 @@ module CopyrightHeader
           
           opts.on( '-o', '--output-dir DIR', 'Use DIR as output directory') do |dir|
             @options[:output_dir] = dir.gsub(/\/+$/, '')
+          end
+
+          opts.on( '-p', '--prefix-dir DIR', 'Prepend DIR to input paths') do |dir|
+            @options[:prefix_dir] = Pathname.new(dir).cleanpath.to_s
           end
           
           opts.on( '--license-file FILE', 'Use FILE as header (instead of using --license argument)' ) do|file|
@@ -121,6 +126,14 @@ module CopyrightHeader
 
         unless File.file?(@options[:license_file])
           raise MissingArgumentException.new("Invalid --license or --license-file argument. Cannot open #{@options[:license_file]}")
+        end
+
+        if @options.has_key?(:prefix_dir)
+          unless File.directory?(@options[:prefix_dir])
+            raise MissingArgumentException.new("Invalid --prefix_dir argument. #{@options[:prefix_dir]} isn't an existing directory")
+          end
+        else
+          @options[:prefix_dir] = ""
         end
      
         if @options[:license]

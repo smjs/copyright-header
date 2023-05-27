@@ -23,6 +23,7 @@ require 'erb'
 require 'ostruct'
 require 'linguist'
 require 'set'
+require 'pathname'
 
 
 module Boolean; end
@@ -183,7 +184,7 @@ module CopyrightHeader
   class Configuration
     @@valid_file_keys = Set[ :syntax, :ext, :include, :license_file, :license, :word_wrap,
                              :copyright_software, :copyright_software_description,
-                             :copyright_years, :copyright_holders, :check_regex]
+                             :copyright_years, :copyright_holders, :check_regex ]
 
     @@file_opt_type_sets = {}
     @@file_opt_type_sets[::Boolean] = Set[ :include ]
@@ -307,7 +308,7 @@ module CopyrightHeader
         end
 
         if opt_keys.include?(:include) && file_opts[:include] == false && opt_keys.size() > 1
-          STDERR.puts "WARNING: In #{conf_filename} for #{file} - :include set to false, but other options provided"
+          STDERR.puts "WARNING: In #{conf_filename} for #{file} - ':include' set to false, but other options provided"
         end
 
       rescue FileOptException => e
@@ -396,15 +397,21 @@ module CopyrightHeader
 
     def transform(method, path)
       paths = []
-      top_dir = nil
 
-      if File.file?(path)
-        paths << path
-        top_dir = File.dirname(File.expand_path(path))
+      prefixed_path_pn = (Pathname.new(@options[:prefix_dir]) + path).cleanpath
+
+      if prefixed_path_pn.file?
+        top_dir_pn = prefixed_path_pn.dirname
+        paths << prefixed_path_pn.to_s
+      elsif prefixed_path_pn.directory?
+        top_dir_pn = prefixed_path_pn
+        paths.push(*Dir.glob(top_dir_pn + "{*,.*}"))
       else
-        paths.push(*Dir.glob("#{path}/{*,.*}"))
-        top_dir = File.expand_path(path)
+        STDERR.puts "ERROR: #{prefixed_path_pn} not found"
+        exit(1);
       end
+
+      top_dir = top_dir_pn.to_s
 
       process_paths(method, top_dir, paths)
     end
@@ -484,10 +491,14 @@ module CopyrightHeader
         STDERR.puts "UPDATE #{file} [no output-dir]"
         STDERR.puts contents
       else
-        dir = "#{@options[:output_dir]}/#{File.dirname(file).gsub(/^\/+/, '')}"
+        cleaned_path = Pathname.new(file).dirname.cleanpath
+        dir = Pathname.new("#{@options[:output_dir]}/#{cleaned_path.sub(@options[:prefix_dir],'')}").cleanpath.to_s
+
         STDERR.puts "UPDATE #{file} [output-dir #{dir}]"
+
         FileUtils.mkpath dir unless File.directory?(dir)
-        output_path = @options[:output_dir] + "/" + file
+
+        output_path = dir + "/" + File.basename(file)
         f =File.new(output_path, 'w')
         f.write(contents)
         f.close
