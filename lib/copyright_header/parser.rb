@@ -25,7 +25,6 @@ require 'linguist'
 require 'set'
 require 'pathname'
 
-
 module Boolean; end
 class TrueClass; include Boolean; end
 class FalseClass; include Boolean; end
@@ -397,7 +396,6 @@ module CopyrightHeader
 
     def transform(method, path)
       paths = []
-
       prefixed_path_pn = (Pathname.new(@options[:prefix_dir]) + path).cleanpath
 
       if prefixed_path_pn.file?
@@ -411,9 +409,7 @@ module CopyrightHeader
         exit(1);
       end
 
-      top_dir = top_dir_pn.to_s
-
-      process_paths(method, top_dir, paths)
+      process_paths(method, top_dir_pn.to_s, paths)
     end
 
     # Note: This is a recursive method
@@ -423,31 +419,31 @@ module CopyrightHeader
       paths.each do |path|
         begin
           base_name = File.basename(path)
-
           file_opts = configuration.options_for_file(base_name)
 
+          skip_reason = nil
           if configuration.has_custom_options?(base_name)
-            if file_opts[:include] == false
-              STDERR.puts "SKIP #{path}; excluded in .cr_conf.yml"
-              next
-            end
+            skip_reason = "excluded in .cr_conf.yml" if file_opts[:include] == false
           else
-            if base_name.match(Regexp.union(@exclude))
-              STDERR.puts "SKIP #{path}; excluded"
-              next
-            end
+            skip_reason = "excluded" if base_name.match(Regexp.union(@exclude))
           end
 
           if File.directory?(path)
-            # belt and braces check for . and .. - recursing on these is bad
+            # check for . and .. - recursing on these is bad
             next if base_name == "." || base_name == ".."
 
-            sub_paths = Dir.glob("#{path}/{*,.*}")
-
-            process_paths(method, path, sub_paths)
+            if skip_reason == nil 
+              sub_paths = Dir.glob("#{path}/{*,.*}")
+              process_paths(method, path, sub_paths)
+            else
+              skip_or_copy(path, skip_reason)
+            end
             next
           elsif !File.file?(path)
             STDERR.puts "SKIP #{path}; not file"
+            next
+          elsif skip_reason != nil
+            skip_or_copy(path, skip_reason)
             next
           end
 
@@ -460,12 +456,12 @@ module CopyrightHeader
             header = syntax.header(path, ext_override)
             contents = header.send(method, license, check_regex)
             if contents.nil?
-              STDERR.puts "SKIP #{path}; failed to #{method == "add:" ? "add" : "remove"} license"
+              skip_or_copy(path, "failed to #{method == "add:" ? "add" : "remove"} license")
             else
               write(path, contents)
             end
           else
-            STDERR.puts "SKIP #{path}; unsupported #{ext_override == nil ? syntax.ext(path) : ext_override}"
+            skip_or_copy(path, "unsupported #{ext_override == nil ? syntax.ext(path) : ext_override}")
           end
         rescue Exception => e
           STDERR.puts "SKIP #{path}; exception=#{e.message}"
@@ -483,6 +479,11 @@ module CopyrightHeader
       transform(:remove, dir)
     end
 
+    def output_dir_for_file(file)
+      cleaned_path = Pathname.new(file).dirname.cleanpath
+      dir = Pathname.new("#{@options[:output_dir]}/#{cleaned_path.sub(@options[:prefix_dir],'')}").cleanpath.to_s
+    end
+
     def write(file, contents)
       if @options[:dry_run]
         STDERR.puts "UPDATE #{file} [dry-run]"
@@ -491,8 +492,7 @@ module CopyrightHeader
         STDERR.puts "UPDATE #{file} [no output-dir]"
         STDERR.puts contents
       else
-        cleaned_path = Pathname.new(file).dirname.cleanpath
-        dir = Pathname.new("#{@options[:output_dir]}/#{cleaned_path.sub(@options[:prefix_dir],'')}").cleanpath.to_s
+        dir = output_dir_for_file(file)
 
         STDERR.puts "UPDATE #{file} [output-dir #{dir}]"
 
@@ -504,5 +504,30 @@ module CopyrightHeader
         f.close
       end
     end
+
+    def skip_or_copy(file, reason)
+      if ! @options[:write_all]
+        STDERR.puts "SKIP #{file}; #{reason}"
+      else
+        if @options[:output_dir].nil?
+          STDERR.puts "COPY #{file} [no output-dir] (will SKIP if output dir == input dir)"
+        else
+          dir = output_dir_for_file(file)
+          input_dir = Pathname.new(file).dirname.cleanpath.to_s
+
+          if dir == input_dir
+            STDERR.puts "SKIP #{file}; won't COPY - input and output paths identical"
+          else
+            STDERR.puts "COPY #{file} [output-dir #{dir}] (skip reason was: #{reason})"
+
+            if !@options[:dry_run]
+              FileUtils.mkpath dir unless File.directory?(dir)
+              FileUtils.cp_r(file, dir, :preserve => true)
+            end
+          end
+        end
+      end
+    end
+
   end
 end

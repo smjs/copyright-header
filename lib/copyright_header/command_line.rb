@@ -90,6 +90,11 @@ module CopyrightHeader
             @options[:guess_extension] = true
           end
 
+          @options[:write_all] ||= false
+          opts.on( '--write-all', 'Write all files from input paths (including files which haven\'t been modified).' ) do 
+            @options[:write_all] = true
+          end
+
           @options[:syntax] ||= @options[:base_path] + '/contrib/syntax.yml'
           opts.on( '-c', '--syntax FILE', 'Syntax configuration file' ) do |path|
             @options[:syntax] = path
