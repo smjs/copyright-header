@@ -295,7 +295,7 @@ module CopyrightHeader
         opt_keys = file_opts.keys.to_set
 
         if !opt_keys.subset?(@@valid_file_keys)
-          raise FileOptException.new("have #{opt_keys.inspect} valid #{@@valid_file_keys.inspect}")
+          raise FileOptException.new("have unknown keys #{(opt_keys-@@valid_file_keys).entries}")
         end
 
         if opt_keys.include?(:license_file) && opt_keys.include?(:license)
