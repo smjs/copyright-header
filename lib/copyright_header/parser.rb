@@ -82,8 +82,8 @@ module CopyrightHeader
       license.format(@config[:comment]['open'], @config[:comment]['close'], @config[:comment]['prefix'])
     end
 
-    def add(license, check_regex = nil)
-      if has_copyright?(check_regex)
+    def add(license, header_regex = nil)
+      if has_copyright?(header_regex)
         raise ExistingLicenseException.new("detected existing license")
       end
 
@@ -122,8 +122,8 @@ module CopyrightHeader
       return text
     end
 
-    def remove(license, check_regex = nil)
-      if has_copyright?(check_regex)
+    def remove(license, header_regex = nil)
+      if has_copyright?(header_regex)
         text = self.format(license)
         # Due to editors messing with whitespace, we'll make this more of a fuzzy match and use \s to match whitespace
         pattern = Regexp.escape(text).gsub(/\\[ n]/, '\s*').gsub(/\\s*$/, '\s')
@@ -183,7 +183,7 @@ module CopyrightHeader
   class Configuration
     @@valid_file_keys = Set[ :syntax, :ext, :include, :license_file, :license, :word_wrap,
                              :copyright_software, :copyright_software_description,
-                             :copyright_years, :copyright_holders, :check_regex ]
+                             :copyright_years, :copyright_holders, :header_regex ]
 
     @@file_opt_type_sets = {}
     @@file_opt_type_sets[::Boolean] = Set[ :include ]
@@ -450,11 +450,11 @@ module CopyrightHeader
           syntax = configuration.syntax_for_file(base_name)
           license = configuration.license_for_file(base_name)
           ext_override = file_opts.has_key?(:ext) ? file_opts[:ext] : nil
-          check_regex = file_opts.has_key?(:check_regex) ? file_opts[:check_regex] : nil
+          header_regex = file_opts.has_key?(:header_regex) ? file_opts[:header_regex] : nil
 
           if syntax.supported?(path, ext_override)
             header = syntax.header(path, ext_override)
-            contents = header.send(method, license, check_regex)
+            contents = header.send(method, license, header_regex)
             if contents.nil?
               skip_or_copy(path, "failed to #{method == "add:" ? "add" : "remove"} license")
             else
